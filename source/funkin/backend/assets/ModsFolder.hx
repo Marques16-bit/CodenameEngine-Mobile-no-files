@@ -7,8 +7,10 @@ import lime.text.Font;
 import openfl.text.Font as OpenFLFont;
 import openfl.utils.AssetLibrary;
 import openfl.utils.AssetManifest;
+import openfl.utils.Assets;
 
 using StringTools;
+
 #if MOD_SUPPORT
 #if sys
 import sys.FileSystem;
@@ -16,7 +18,6 @@ import sys.FileSystem;
 import js.html.FileSystem;
 #end
 #end
-
 
 class ModsFolder {
 	/**
@@ -28,14 +29,16 @@ class ModsFolder {
 	 * Current mod folder. Will affect `Paths`.
 	 */
 	public static var currentModFolder:String = null;
+
 	/**
-	 * Path to the `mods` folder.
+	 * Path to the `mods` folder (Ajustado para assets/mods/ internamente no Mobile)
 	 */
-	public static var modsPath:String = #if mobile MobileUtil.getDirectory() + #else Sys.getCwd() + #end "mods/";
+	public static var modsPath:String = #if (mobile || android) "assets/mods/" #else "mods/" #end;
+
 	/**
 	 * Path to the `addons` folder.
 	 */
-	public static var addonsPath:String = #if mobile MobileUtil.getDirectory() + #else Sys.getCwd() + #end "addons/";
+	public static var addonsPath:String = #if (mobile || android) "assets/addons/" #else "addons/" #end;
 
 	/**
 	 * If accessing a file as assets/data/global/LIB_mymod.hx should redirect to mymod:assets/data/global.hx
@@ -51,8 +54,10 @@ class ModsFolder {
 	 * Initializes `mods` folder.
 	 */
 	public static function init() {
+		#if !(mobile || android)
 		if (!FileSystem.exists(modsPath)) FileSystem.createDirectory(modsPath);
 		if (!FileSystem.exists(addonsPath)) FileSystem.createDirectory(addonsPath);
+		#end
 
 		if(!getModsList().contains(Options.lastLoadedMod)) {
 			if(Options.lastLoadedMod != null)
@@ -90,12 +95,15 @@ class ModsFolder {
 	 */
 	public static function loadModLib(path:String, force:Bool = false, ?modName:String) {
 		#if MOD_SUPPORT
+		#if (mobile || android)
+		return loadLibraryFromFolder('$path'.toLowerCase(), '$path', force, modName);
+		#else
 		for (ext in Flags.ALLOWED_ZIP_EXTENSIONS) {
 			if (!FileSystem.exists('$path.$ext')) continue;
 			return loadLibraryFromZip('$path'.toLowerCase(), '$path.$ext', force, modName);
 		}
 		return loadLibraryFromFolder('$path'.toLowerCase(), '$path', force, modName);
-
+		#end
 		#else
 		return null;
 		#end
@@ -104,6 +112,21 @@ class ModsFolder {
 	public static function getModsList():Array<String> {
 		var mods:Array<String> = [];
 		#if MOD_SUPPORT
+
+		#if (mobile || android)
+		// MODO NO FILES: Varre a lista de assets embutidos no APK
+		var list = Assets.list();
+		for (asset in list) {
+			if (asset.startsWith("assets/mods/") || asset.startsWith("mods/")) {
+				var subPath = asset.startsWith("assets/mods/") ? asset.substr("assets/mods/".length) : asset.substr("mods/".length);
+				var folder = subPath.split("/")[0];
+				if (folder != "" && !mods.contains(folder)) {
+					mods.push(folder);
+				}
+			}
+		}
+		#else
+		// Leitura padrao Desktop via FileSystem
 		final modsList:Array<String> = FileSystem.readDirectory(modsPath);
 
 		if (modsList == null || modsList.length <= 0) return mods;
@@ -113,8 +136,11 @@ class ModsFolder {
 			else if (Flags.ALLOWED_ZIP_EXTENSIONS.contains(Path.extension(modFolder))) mods.push(Path.withoutExtension(modFolder));
 		}
 		#end
+
+		#end
 		return mods;
 	}
+
 	public static function getLoadedModsLibs(skipTranslated:Bool = false):Array<IModsAssetLibrary> {
 		var libs = [];
 		for (i in Paths.assetsTree.libraries) {
@@ -122,12 +148,11 @@ class ModsFolder {
 			#if TRANSLATIONS_SUPPORT
 			if(skipTranslated && (l is TranslatedAssetLibrary)) continue;
 			#end
-			// No need to check for it being a `ScriptedAssetLibrary`, if `ScriptedAssetLibrary` extends ModsFolderLibrary, which implements `IModsAssetLibrary`
-			// If you have to revert this change then uhhhhh wasn't me, trust 🙏
-			if (/*l is ScriptedAssetLibrary ||*/ l is IModsAssetLibrary) libs.push(cast(l, IModsAssetLibrary));
+			if (l is IModsAssetLibrary) libs.push(cast(l, IModsAssetLibrary));
 		}
 		return libs;
 	}
+
 	public static function getLoadedMods(skipTranslated:Bool = false):Array<String>
 		return [for (modLib in getLoadedModsLibs(skipTranslated)) modLib.modName];
 
